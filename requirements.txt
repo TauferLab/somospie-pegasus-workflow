@@ -1,0 +1,5 @@
+# Submit-host dependencies (workflow generation + submission only).
+# Runtime script dependencies (gdal, pandas, scikit-learn, requests)
+# live in the Apptainer container, NOT here.
+pegasus-wms>=5.0.0
+pyyaml>=6.0

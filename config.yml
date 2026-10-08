@@ -1,0 +1,83 @@
+# somospie-pegasus-workflow configuration. Edit this file to change
+# state, inputs, tiles, or model settings
+
+workflow:
+  name: somospie-pegasus-workflow
+  output: workflow.yml
+
+# State and resolution to process. Passed as
+# ?state=&resolution= to the URL service.
+region:
+  state: TN         # Required. State to process (e.g. TN, KY, NC).
+  resolution: 30m   # Required. Pnly 30m or 10m available.
+
+# Required: GADM USA level-1 file (state boundaries)
+roi_url: https://geodata.ucdavis.edu/gadm/gadm4.1/json/gadm41_USA_1.json.zip
+
+# Definition of data sources
+data_sources:
+  terrain:
+    type: url-service
+    service_url: https://intersect.nationalsciencedatafabric.org/somospie
+    # .tif files to download and use as model features.
+    # Uncomment to add more input variables (it is recommended to keep the inputs small):
+    predictors:
+      aspect: aspect.tif
+      elevation: elevation.tif
+      hillshading: hillshade.tif
+      slope: slope.tif
+      # channel_network_grid: channel_network_grid.tif
+      # convergence_index: convergence_index.tif
+      # drainage_basins_grid: drainage_basins_grid.tif
+      # filled_depressions: filled_depressions.tif
+      # flow_connectivity: flow_connectivity.tif
+      # flow_direction: flow_direction.tif
+      # flow_width: flow_width.tif
+      # plan_curvature: plan_curvature.tif
+      # profile_curvature: profile_curvature.tif
+      # total_catchment_area: total_catchment_area.tif
+      # watershed_basins: watershed_basins.tif
+
+    #  Backup if the URL service fails. Per-file links live in the
+    # JSON file below (same names as predictors + roi_shape).
+    fallback:
+      type: dataverse
+      enabled: true
+      file: dataverse.json
+
+  # Soil moisture data
+  # It is recommended to run analysis for 2010 only
+  soil_moisture:
+      type: ftp
+      base_url: ftp://anon-ftp.ceda.ac.uk/neodc/esacci/soil_moisture/data/daily_files/COMBINED
+      version: "7.1"       # ESA CCI product version.
+      year: 2010           # Required. Year to download.
+      months: [1]          # Required. Months to download (1-12).
+
+training:
+  # Month of the downloaded soil-moisture data to train on.
+  # Must be one of soil_moisture.months above
+  train_month: 1
+  n_iter: 10       # Search iterations (higher = slower, sometimes better)
+  cv: 5            # Cross-validation folds
+  max_trees: 500   # Upper bound on trees tried
+  seed: 1024       # Random seed for reproducibility
+
+inference:
+  # Grid is n_tiles x n_tiles. Larger n_tiles = more, smaller
+  # parallel jobs. 6 is the tested default.
+  n_tiles: 6
+  # Tiles to predict: [x, y] positions, (0, 0) upper-left, indices
+  # 0 to n_tiles - 1. Unlisted tiles become nodata in the final map.
+  # Use "all" for the full state map.
+  # eval_tiles: all
+  eval_tiles: [[0, 0], [0, 1]]
+
+visualization:
+  cmap: RdBu        # Colormap for the moisture layer.
+  # vmin: 0.2           # Fixed scale low (absolute units, comparable across runs).
+  # vmax: 0.4           # Fixed scale high.
+  dpi: 150            # Output resolution.
+
+container:
+  sif: Apptainer/SOMOSPIE_Container.sif  # Container image (used only with --container-sif)

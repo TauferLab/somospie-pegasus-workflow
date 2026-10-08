@@ -216,3 +216,17 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# somospie-pegasus-workflow runtime artifacts
+output/
+scratch/
+*.sif
+*.pkl
+*.tif
+workflow.yml
+sites.yml
+transforms.yml
+replicas.yml
+pegasus.properties
+submit/
+cache/

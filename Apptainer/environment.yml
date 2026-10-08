@@ -1,0 +1,17 @@
+# Conda spec for the workflow runtime. Used two ways:
+# 1. Installed into the container by SOMOSPIE_Container.def (%post).
+# 2. Bare-mode recipe: conda env create -f Apptainer/environment.yml
+name: somospie
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - gdal
+  - pandas
+  - scikit-learn
+  - numpy
+  - netcdf4
+  - requests
+  - libgdal-netcdf
+  - matplotlib

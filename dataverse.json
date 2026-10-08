@@ -1,0 +1,11 @@
+{
+  "30m": {
+    "TN": {
+      "aspect.tif": "REPLACE_ME",
+      "elevation.tif": "REPLACE_ME",
+      "hillshade.tif": "REPLACE_ME",
+      "slope.tif": "REPLACE_ME",
+      "drainage_basins.zip": "REPLACE_ME"
+    }
+  }
+}
