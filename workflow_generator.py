@@ -558,7 +558,7 @@ the command it prints, or from a notebook (plan_submit()).
     parser.add_argument("--state", default=None,
                         help="override region.state (e.g. AL)")
     parser.add_argument("--container-sif", default=None,
-                        help="run jobs in this .sif (omit = bare interpreter)")
+                        help="... omit = auto (config.yml container.sif else Apptainer/SOMOSPIE_Container.sif if built, else bare); pass '' for bare")
     parser.add_argument("--output", default=None,
                         help="DAG path (default from config)")
     parser.add_argument(
@@ -574,13 +574,30 @@ the command it prints, or from a notebook (plan_submit()).
     if not os.path.isfile(args.config):
         print(f"error: config not found: {args.config}", file=sys.stderr)
         return 2
+    
+    wf_dir = os.path.dirname(os.path.abspath(args.config))
+    if args.container_sif is None:
+        try:
+            with open(args.config) as cf:
+                cfg_sif = (yaml.safe_load(cf) or {}).get("container", {}).get("sif")
+        except OSError:
+            cfg_sif = None
+        cand_rel = cfg_sif or "Apptainer/SOMOSPIE_Container.sif"
+        cand = cand_rel if os.path.isabs(cand_rel) else os.path.join(wf_dir, cand_rel)
+        if os.path.exists(cand):
+            args.container_sif = cand_rel
+        else:
+            logger.warning(f"no container at {cand_rel}, running bare")
+            args.container_sif = ""
+    if args.container_sif == "":
+        args.container_sif = None
     if args.container_sif and not os.path.exists(
             args.container_sif if os.path.isabs(args.container_sif)
-            else os.path.join(os.path.dirname(os.path.abspath(args.config)),
-                              args.container_sif)):
+            else os.path.join(wf_dir, args.container_sif)):
         print(f"error: container image not found: {args.container_sif}",
               file=sys.stderr)
         return 2
+    
     try:
         wf = SOMOSPIEWorkflow(args.config, state=args.state,
                               container_sif=args.container_sif,
