@@ -21,3 +21,55 @@ From: continuumio/miniconda3
 
 %runscript
     exec /bin/bash "$@"
+
+
+Bootstrap: docker
+From: python:3.13-slim-trixie
+
+# SOMOSPIE container — Debian 13 (trixie) to match the submit host
+# (X86_64-Debian_13, glibc 2.41). 
+#
+# Package-to-step map (from environment.yml + bin/*.py imports):
+#   gdal-bin / python3-gdal  -> acquire_roi (ogr2ogr cutline),
+#                               process_soil_moisture (osgeo.gdal, gdal_translate),
+#                               process_terrain / generate_train / generate_eval /
+#                               merge_predictions (warps, VRTs, mosaics)
+#   python3 netCDF driver    -> process_soil_moisture NETCDF:"..." subdatasets
+#                               (libgdal-netcdf equivalent; verify below)
+#   pandas / numpy / requests -> acquire_* (manifests, downloads)
+#   scikit-learn             -> train_model / evaluate_model
+#   matplotlib               -> visualize_map (Agg, headless)
+#
+# Build (Linux x86_64 only — Mac ARM builds will not exec on Studio workers):
+#   cd somospie-pegasus-workflow
+#   apptainer build Apptainer/SOMOSPIE_Container.sif Apptainer/SOMOSPIE_Container.def
+# Use:
+#   ./workflow_generator.py --container-sif Apptainer/SOMOSPIE_Container.sif -e condorpool
+
+%labels
+    Maintainer somospie-pegasus-workflow
+    Application "SOMOSPIE simple RF workflow"
+
+%post
+    set -eu
+    export DEBIAN_FRONTEND=noninteractive
+
+    # curl + wget are mandatory: PegasusLite downloads its worker package
+    # inside the container before the job script ever runs.
+    # gdal-bin + python3-gdal stay version-locked via apt.
+    apt-get update && apt-get install -y --no-install-recommends \
+        curl wget ca-certificates \
+        gdal-bin python3-gdal \
+     && rm -rf /var/lib/apt/lists/*
+
+    pip install --no-cache-dir \
+        pandas scikit-learn numpy netCDF4 requests matplotlib
+
+    mkdir -p /app/output
+
+%environment
+    # Unbuffered output so Pegasus captures job logs as they are produced.
+    export PYTHONUNBUFFERED=1
+
+%runscript
+    exec /bin/bash "$@"
