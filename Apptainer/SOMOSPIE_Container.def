@@ -1,29 +1,4 @@
 Bootstrap: docker
-From: continuumio/miniconda3
-
-%labels
-    Maintainer somospie-pegasus-workflow
-    Application "SOMOSPIE simple RF workflow"
-
-%post
-    apt-get update && apt-get install -y --no-install-recommends \
-        curl wget ca-certificates \
-     && rm -rf /var/lib/apt/lists
-    # curl/wget are mandatory: PegasusLite fetches its worker package
-    # with them inside the container before the job runs.
-    conda install -y -c conda-forge \
-        python=3.11 gdal pandas scikit-learn numpy netcdf4 requests libgdal-netcdf matplotlib \
-     && conda clean -afy
-    mkdir -p /app/output
-
-%environment
-    PYTHONUNBUFFERED=1
-
-%runscript
-    exec /bin/bash "$@"
-
-
-Bootstrap: docker
 From: python:3.13-slim-trixie
 
 # SOMOSPIE container — Debian 13 (trixie) to match the submit host
