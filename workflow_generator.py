@@ -165,12 +165,17 @@ class SOMOSPIEWorkflow:
             ),
         )
 
-        exec_site = (Site(self.exec_site)
-                     .add_condor_profile(universe="vanilla")
-                     .add_pegasus_profile(style="condor")
-        )
-
-        self.sc.add_sites(local, exec_site)
+        if self.exec_site == "local":
+            # Cannot add Site("local") twice — Pegasus raises DuplicateError.
+            local.add_condor_profile(universe="vanilla") \
+                .add_pegasus_profile(style="condor")
+            self.sc.add_sites(local)
+        else:
+            exec_site = (Site(self.exec_site)
+                        .add_condor_profile(universe="vanilla")
+                        .add_pegasus_profile(style="condor")
+            )
+            self.sc.add_sites(local, exec_site)
 
 
     def create_replica_catalog(self):
