@@ -2,17 +2,26 @@
 """Generate the somospie-pegasus-workflow Pegasus DAG from config.yml.
 
 Reads data selection, model settings, and tiling from the config;
-writes sites/transformations/replica catalogs + pegasus.properties +
-workflow.yml. Submit with:
-  pegasus-plan --submit -s condorpool -o local workflow.yml
-(or -s local for submit-host testing).
+writes transformations/replica catalogs + pegasus.properties +
+workflow.yml. Sites follow pegasus-isi/pegasus-gromacs: jobs run on a
+site named "compute", defined by a centrally hosted site catalog
+(-s FILE) or the notebook's local HTCondor catalog. The CLI writes no
+site catalog and never submits: it prints the pegasus-plan command.
+
+Usage:
+    ./workflow_generator.py                       # jobs on site "compute"
+    ./workflow_generator.py -e condorpool         # plain HTCondor pool, no site catalog
+    ./workflow_generator.py -s access-pegasus.yml # a hosted site catalog
+    ./workflow_generator.py -e local              # on the submit host
 """
 
 import argparse
 import json
 import logging
 import os
+import subprocess
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -33,9 +42,42 @@ MEMORY = {
     "visualize_map": "2GB",
 }
 
+# Pegasus worker package (kickstart etc.) used *inside* the optional
+# container, which must match the container base image. Left alone,
+# PegasusLite sees the submit host's package as a mismatch and tries to
+# download one from inside the container, which fails when the image has
+# no curl/wget (exit code 71). Change this with the container's base image.
+WORKER_PACKAGE_PLATFORM = "x86_64_deb_13"
+WORKER_PACKAGE_URL = ("https://download.pegasus.isi.edu/pegasus/{v}/"
+                      "pegasus-worker-{v}-" + WORKER_PACKAGE_PLATFORM + ".tar.gz")
+
+
+def planner_version():
+    """Version of the pegasus-plan that will plan this workflow, or None."""
+    try:
+        out = subprocess.run(["pegasus-version"], capture_output=True,
+                             text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    version = out.stdout.strip()
+    return version if out.returncode == 0 and version else None
+
+
 class SOMOSPIEWorkflow:
+    wf = None
+    sc = None
+    tc = None
+    rc = None
+    props = None
+
+    wf_name = None
+    wf_dir = None
+    dagfile = None
+    shared_scratch_dir = None
+    local_storage_dir = None
+
     def __init__(self, config_path, state=None, container_sif=None,
-                 output=None, exec_site="condorpool", submit=False):
+                 output=None):
         with open(config_path) as f:
             self.config = yaml.safe_load(f)
         if state:
@@ -45,13 +87,21 @@ class SOMOSPIEWorkflow:
         self.container_sif = container_sif
         self.dagfile = output or os.path.join(
             self.wf_dir, self.config["workflow"]["output"])
-        self.exec_site = exec_site
-        self.submit = submit
         self.wf_name = self.config["workflow"]["name"]
         self.shared_scratch_dir = os.path.join(self.wf_dir, "scratch")
         self.local_storage_dir = os.path.join(self.wf_dir, "output")
         os.makedirs(self.shared_scratch_dir, exist_ok=True)
         os.makedirs(self.local_storage_dir, exist_ok=True)
+        # Only the container needs its own worker package (see above).
+        self.worker_package_url = None
+        if container_sif:
+            version = planner_version()
+            if version:
+                self.worker_package_url = WORKER_PACKAGE_URL.format(v=version)
+            else:
+                logger.warning(
+                    "pegasus-version not found; the container will try to "
+                    "download a worker package itself and fail (no curl/wget)")
 
         self.validate_config()
         self.derive()
@@ -147,12 +197,30 @@ class SOMOSPIEWorkflow:
 
 
     # ---- catalogs ----------------------------------------------------
-    def create_pegasus_properties(self):
+    def create_pegasus_properties(self, hosted_site_catalog=None):
         self.props = Properties()
         self.props["pegasus.transfer.threads"] = "16"
+        if hosted_site_catalog:
+            # Use one of Pegasus' centrally hosted site catalogs instead of
+            # a locally generated one. pegasus-plan downloads and caches the
+            # named file from the catalog repository at plan time.
+            self.props["pegasus.catalog.site.repo.file"] = hosted_site_catalog
+        if self.worker_package_url:
+            # Stage the container's worker package named in the transformation
+            # catalog and never download one from inside the job.
+            self.props["pegasus.transfer.worker.package"] = "true"
+            self.props["pegasus.transfer.worker.package.strict"] = "false"
+            self.props["pegasus.transfer.worker.package.autodownload"] = "false"
 
 
-    def create_sites_catalog(self):
+    def create_sites_catalog(self, exec_site_name="compute"):
+        # Notebook-only: a self-contained local + HTCondor catalog for this
+        # machine's pool. The CLI never calls this (no sites.yml is written):
+        # -s <hosted> resolves "compute" from the hosted catalog,
+        # -s condorpool / -s local resolve from Pegasus' built-ins.
+        # Writing a custom single-site "local" catalog here is what caused
+        # Starter to exec /tmp/pegasus-kickstart (ENOENT); do not re-add it
+        # to the CLI path.
         self.sc = SiteCatalog()
         local = Site("local").add_directories(
             Directory(Directory.SHARED_SCRATCH,
@@ -165,17 +233,11 @@ class SOMOSPIEWorkflow:
             ),
         )
 
-        if self.exec_site == "local":
-            # Cannot add Site("local") twice — Pegasus raises DuplicateError.
-            local.add_condor_profile(universe="vanilla") \
-                .add_pegasus_profile(style="condor")
-            self.sc.add_sites(local)
-        else:
-            exec_site = (Site(self.exec_site)
-                        .add_condor_profile(universe="vanilla")
-                        .add_pegasus_profile(style="condor")
-            )
-            self.sc.add_sites(local, exec_site)
+        exec_site = (Site(exec_site_name)
+                     .add_condor_profile(universe="vanilla")
+                     .add_pegasus_profile(style="condor")
+        )
+        self.sc.add_sites(local, exec_site)
 
 
     def create_replica_catalog(self):
@@ -187,7 +249,7 @@ class SOMOSPIEWorkflow:
                 self.rc.add_replica("local", File(rel), path)
 
 
-    def create_transformation_catalog(self):
+    def create_transformation_catalog(self, exec_site_name="compute"):
         self.tc = TransformationCatalog()
         container = None
         if self.container_sif:
@@ -195,13 +257,26 @@ class SOMOSPIEWorkflow:
                         if os.path.isabs(self.container_sif)
                         else os.path.join(self.wf_dir, self.container_sif))
             if not os.path.exists(sif_path):
-                logger.warning(
-                    f"container not found at {sif_path} — build it with: "
+                logger.error(
+                    f"Container image not found: {sif_path} — build it with: "
                     f"apptainer build {sif_path} Apptainer/SOMOSPIE_Container.def")
+                raise ValueError(f"Container image not found: {sif_path}")
             container = Container(
                 "somospie_container", Container.SINGULARITY,
-                image="file://" + sif_path, image_site="local")
+                image="file://" + os.path.abspath(sif_path), image_site="local")
             self.tc.add_containers(container)
+            if self.worker_package_url:
+                self.tc.add_transformations(
+                    Transformation(
+                        "worker",
+                        namespace="pegasus",
+                        site="local",
+                        pfn=self.worker_package_url,
+                        is_stageable=True,
+                        arch=Arch.X86_64,
+                        os_type=OS.LINUX,
+                    )
+                )
         scripts = {
             "acquire_terrain": "bin/acquire_terrain.py",
             "acquire_roi": "bin/acquire_roi.py",
@@ -220,7 +295,7 @@ class SOMOSPIEWorkflow:
             if container is not None:
                 kwargs["container"] = container
             tr = Transformation(
-                name, site=self.exec_site,
+                name, site=exec_site_name,
                 pfn=os.path.join(self.wf_dir, rel),
                 is_stageable=True, **kwargs
             ).add_pegasus_profile(memory=MEMORY[name])
@@ -429,25 +504,56 @@ class SOMOSPIEWorkflow:
         self.tc.write()
         self.wf.write(file=self.dagfile)
 
-    def build(self):
-        self.create_pegasus_properties()
-        self.create_sites_catalog()
-        self.create_replica_catalog()
-        self.create_transformation_catalog()
-        self.create_workflow()
-        self.write()
-        logger.info(f"wrote {self.dagfile} (+ sites/transforms/replicas.yml, "
-                    f"pegasus.properties)")
-        if self.submit:
-            self.wf.plan(sites=[self.exec_site], output_sites=["local"],
-                         submit=True)
+    def plan_submit(self, exec_site_name="compute", raise_errors=False):
+        # Thin wrapper over Workflow.plan(), for notebook/interactive use.
+        try:
+            self.wf.plan(
+                dir="submit",
+                sites=[exec_site_name],
+                output_sites=["local"],
+                cleanup="none",
+                verbose=1,
+                submit=True,
+            )
+        except PegasusClientError as e:
+            print(e)
+            if raise_errors:
+                raise
+
+    def status(self):
+        try:
+            self.wf.status(long=True)
+        except PegasusClientError as e:
+            print(e)
+
+    def wait(self):
+        try:
             self.wf.wait()
+        except PegasusClientError as e:
+            print(e)
+
+    def statistics(self):
+        try:
             self.wf.statistics()
+        except PegasusClientError as e:
+            print(e)
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Generate the SOMOSPIE Pegasus DAG from config.yml.")
+        description="Generate the SOMOSPIE Pegasus DAG from config.yml.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s                              # generate workflow.yml for site "compute"
+  %(prog)s -e condorpool                # plain HTCondor pool, no site catalog
+  %(prog)s -s access-pegasus.yml        # a centrally hosted site catalog
+  %(prog)s -e local                     # run the jobs on the submit host
+
+Writes the workflow and its catalogs; it does not plan or submit. Plan with
+the command it prints, or from a notebook (plan_submit()).
+""",
+    )
     parser.add_argument("--config", default="config.yml")
     parser.add_argument("--state", default=None,
                         help="override region.state (e.g. AL)")
@@ -455,32 +561,51 @@ def main(argv=None):
                         help="run jobs in this .sif (omit = bare interpreter)")
     parser.add_argument("--output", default=None,
                         help="DAG path (default from config)")
-    parser.add_argument("-e", "--exec-site", default="condorpool",
-                        help="execution site: condorpool | local")
-    parser.add_argument("--submit", action="store_true",
-                        help="plan, submit, wait, and print statistics")
+    parser.add_argument(
+        "-s", "--hosted-site-catalog", metavar="FILE", type=str, default=None,
+        help="Name of a Pegasus centrally hosted site catalog to plan against "
+             "(e.g. access-pegasus.yml), instead of a locally generated one.")
+    parser.add_argument(
+        "-e", "--execution-site-name", metavar="STR", type=str, default="compute",
+        help='Execution site name (default: compute; condorpool on a plain '
+             'HTCondor pool with no site catalog, local on the submit host)')
     args = parser.parse_args(argv)
 
     if not os.path.isfile(args.config):
         print(f"error: config not found: {args.config}", file=sys.stderr)
         return 2
+    if args.container_sif and not os.path.exists(
+            args.container_sif if os.path.isabs(args.container_sif)
+            else os.path.join(os.path.dirname(os.path.abspath(args.config)),
+                              args.container_sif)):
+        print(f"error: container image not found: {args.container_sif}",
+              file=sys.stderr)
+        return 2
     try:
         wf = SOMOSPIEWorkflow(args.config, state=args.state,
                               container_sif=args.container_sif,
-                              output=args.output,
-                              exec_site=args.exec_site,
-                              submit=args.submit)
-        wf.build()
+                              output=args.output)
+        wf.create_pegasus_properties(hosted_site_catalog=args.hosted_site_catalog)
+        wf.create_transformation_catalog(exec_site_name=args.execution_site_name)
+        wf.create_replica_catalog()
+        wf.create_workflow()
+        wf.write()
+        logger.info(f"\nWorkflow written to {wf.dagfile}")
+        # --output-dir: no site catalog defines "local" storage here, so
+        # Pegasus's built-in local site would otherwise stage outputs to
+        # ./wf-output.
+        logger.info(
+            f"Plan and submit: pegasus-plan --dir submit "
+            f"-s {args.execution_site_name} -o local "
+            f"--output-dir {wf.local_storage_dir} --submit {wf.dagfile}")
     except (ValueError, KeyError) as e:
         print(f"error: invalid config: {e}", file=sys.stderr)
         return 1
-    print(f"next: pegasus-plan --submit -s {args.exec_site} -o local "
-          f"{wf.dagfile}")
+    except PegasusClientError as e:
+        print(e, file=sys.stderr)
+        return 1
     return 0
 
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-    
