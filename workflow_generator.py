@@ -257,10 +257,9 @@ class SOMOSPIEWorkflow:
                         if os.path.isabs(self.container_sif)
                         else os.path.join(self.wf_dir, self.container_sif))
             if not os.path.exists(sif_path):
-                logger.error(
-                    f"Container image not found: {sif_path} — build it with: "
-                    f"apptainer build {sif_path} Apptainer/SOMOSPIE_Container.def")
-                raise ValueError(f"Container image not found: {sif_path}")
+                logger.warning(
+                    f"Apptainer image not found at {sif_path} — "
+                    f"Run will build it before planning")
             container = Container(
                 "somospie_container", Container.SINGULARITY,
                 image="file://" + os.path.abspath(sif_path), image_site="local")
@@ -578,17 +577,16 @@ the command it prints, or from a notebook (plan_submit()).
     
     wf_dir = os.path.dirname(os.path.abspath(args.config))
     if not args.container_sif:
-        print("error: --container-sif is required — press Build Image first, then Run again",
-              file=sys.stderr)
-        return 2
+        args.container_sif = "Apptainer/SOMOSPIE_Container.sif"
     sif_check = (args.container_sif if os.path.isabs(args.container_sif)
                  else os.path.join(wf_dir, args.container_sif))
     if not os.path.exists(sif_check):
-        print(f"error: software environment not built: {sif_check} missing — "
-              f"press Build Image first, then Run again", file=sys.stderr)
-        return 2
+        logger.warning(
+            f"Apptainer image not found at {sif_check} — "
+            f"Run will build it before planning "
+            f"(or build now with: apptainer build {sif_check} "
+            f"Apptainer/SOMOSPIE_Container.def)")
 
-    
     try:
         wf = SOMOSPIEWorkflow(args.config, state=args.state,
                               container_sif=args.container_sif,
