@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Download one month of ESA CCI daily soil-moisture NetCDFs.
 
+Primary transport is HTTPS via the CEDA archive
+(https://data.ceda.ac.uk, redirecting to https://dap.ceda.ac.uk);
+anonymous access, no login required (verified: public dataset,
+31/31 Jan-2010 files fetch anonymously).
+
 Outputs a zip of the downloaded days plus a manifest. Days missing
-upstream (HTTP 404) are skipped with a warning; the job fails only
-if zero days were obtained for the month.
+upstream (HTTP 404 over HTTPS, exit 19 over legacy FTP) are skipped
+with a warning; the job fails only if zero days were obtained for
+the month.
 
 Exit codes: 0 = days-zip valid on disk (+ manifest written);
 1 = failure, with the cause named on stderr.
@@ -31,9 +37,9 @@ def get_parser():
     p = argparse.ArgumentParser(
         description="Download one month of ESA CCI daily soil-moisture files."
     )
-    p.add_argument("--ftp-base", required=True,
-                   help="e.g. ftp://anon-ftp.ceda.ac.uk/neodc/esacci/"
-                        "soil_moisture/data/daily_files/COMBINED/v07.1")
+    p.add_argument("--base-url", required=True,
+                   help="e.g. https://data.ceda.ac.uk/neodc/esacci/"
+                        "soil_moisture/data/daily_files/COMBINED")
     p.add_argument("--version", required=True, help="e.g. 7.1")
     p.add_argument("--year", type=int, required=True)
     p.add_argument("--month", type=int, required=True, help="1-12")
@@ -48,7 +54,7 @@ def get_parser():
     return p
 
 
-def day_files(year, month, ftp_base, version):
+def day_files(year, month, base_url, version):
     """All candidate (day, filename, url) triples for the month."""
     if not 1 <= month <= 12:
         raise ValueError(f"bad --month {month}, expected 1-12")
@@ -60,7 +66,7 @@ def day_files(year, month, ftp_base, version):
     ftag = f"fv0{vnum:.1f}"   # fv07.1
     _, ndays = calendar.monthrange(year, month)
     out = []
-    directory = f"{ftp_base.rstrip('/')}/{vdir}/{year}/"
+    directory = f"{base_url.rstrip('/')}/{vdir}/{year}/"
     for day in range(1, ndays + 1):
         stamp = f"{year:04d}{month:02d}{day:02d}"
         filename = (f"ESACCI-SOILMOISTURE-L3S-SSMV-COMBINED-"
@@ -71,8 +77,9 @@ def day_files(year, month, ftp_base, version):
 
 def curl_fetch(url, dest, retries):
     """Fetch url to dest with curl. Return 'ok', 'missing' (no such file),
-    or raise DownloadError. FTP-aware: success is the exit code, since
-    %{http_code} is meaningless (000) over FTP."""
+    or raise DownloadError. HTTPS-only: a missing upstream file is
+    curl exit 22 with a 404 in stderr (curl -f maps HTTP >= 400
+    to exit 22)."""
     last = None
     for attempt in range(1, retries + 1):
         try:
@@ -100,14 +107,16 @@ def curl_fetch(url, dest, retries):
                     time.sleep(2 ** attempt)
                 continue
             return "ok"
-        if proc.returncode == 19:
-            # FTP couldn't retrieve the file: missing upstream, skip.
+        
+        stderr = proc.stderr.decode().strip()
+        if proc.returncode == 22 and "404" in stderr:
+            # HTTP(S) file not found upstream, skip.
             try:
                 os.remove(dest)
             except OSError:
                 pass
             return "missing"
-        last = (proc.stderr.decode().strip().splitlines() or
+        last = (stderr.splitlines() or
                 [f"curl exit {proc.returncode}"])[-1]
         try:
             os.remove(dest)
@@ -151,10 +160,10 @@ def write_zip(day_paths, days_zip):
     return os.path.getsize(days_zip)
 
 
-def write_manifest(path, *, ftp_base, version, year, month,
+def write_manifest(path, *, base_url, version, year, month,
                    days, missing_days, zip_bytes):
     manifest = {
-        "ftp_base": ftp_base,
+        "base_url": base_url,
         "version": version,
         "year": year,
         "month": month,
@@ -173,7 +182,7 @@ def main(argv=None):
     args = get_parser().parse_args(argv)
     try:
         candidates = day_files(args.year, args.month,
-                               args.ftp_base, args.version)
+                               args.base_url, args.version)
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
@@ -227,7 +236,7 @@ def main(argv=None):
         [(day, filename, path) for day, filename, path in downloaded],
         args.days_zip)
     write_manifest(
-        args.manifest, ftp_base=args.ftp_base, version=args.version,
+        args.manifest, base_url=args.base_url, version=args.version,
         year=args.year, month=args.month,
         days=[{"day": day, "local": filename,
                "bytes": os.path.getsize(path)}

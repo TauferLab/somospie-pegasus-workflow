@@ -48,8 +48,7 @@ data_sources:
   # Soil moisture data
   # It is recommended to run analysis for 2010 only
   soil_moisture:
-      type: ftp
-      base_url: ftp://anon-ftp.ceda.ac.uk/neodc/esacci/soil_moisture/data/daily_files/COMBINED
+      base_url: https://data.ceda.ac.uk/neodc/esacci/soil_moisture/data/daily_files/COMBINED
       version: "7.1"       # ESA CCI product version.
       year: 2010           # Required. Year to download.
       months: [1]          # Required. Months to download (1-12).

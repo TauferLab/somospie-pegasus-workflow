@@ -13,7 +13,7 @@ STATE="TN"
 RESOLUTION="30m"
 SERVICE_URL="https://intersect.nationalsciencedatafabric.org/somospie"
 GADM_URL="https://geodata.ucdavis.edu/gadm/gadm4.1/json/gadm41_USA_1.json.zip"
-FTP_BASE="ftp://anon-ftp.ceda.ac.uk/neodc/esacci/soil_moisture/data/daily_files/COMBINED"
+BASE_URL="https://data.ceda.ac.uk/neodc/esacci/soil_moisture/data/daily_files/COMBINED"
 YEAR="2010"
 MONTH="1"
 
@@ -41,7 +41,7 @@ echo "=== Step 1b: Acquiring ROI cutline (GADM state boundary) ==="
 
 echo "=== Step 1c: Acquiring soil moisture (ESA CCI, ${YEAR}-${MONTH}) ==="
 ./bin/acquire_soil_moisture.py \
-    --ftp-base "${FTP_BASE}" \
+    --base-url "${BASE_URL}" \
     --version 7.1 --year "${YEAR}" --month "${MONTH}" \
     --output-dir "${OUT}/sm" \
     --days-zip "${OUT}/sm_${YEAR}_0${MONTH}_days.zip" \

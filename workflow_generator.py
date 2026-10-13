@@ -315,7 +315,7 @@ class SOMOSPIEWorkflow:
             sm_tifs[month] = monthly
             acq = self._job(
                 "acquire_soil_moisture", f"acquire_sm_{label}",
-                ["--ftp-base", sm["base_url"],
+                ["--base-url", sm["base_url"],
                  "--version", str(sm["version"]),
                  "--year", str(sm["year"]),
                  "--month", str(month),
