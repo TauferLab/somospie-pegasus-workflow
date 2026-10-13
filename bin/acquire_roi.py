@@ -20,6 +20,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import shutil 
 import time
 import urllib.parse
 import zipfile
@@ -229,6 +230,12 @@ def main(argv=None):
         where = "NAME_1 = '" + state_name.replace("'", "''") + "'"
         shape_dir = os.path.join(workdir, "shp")
         os.makedirs(shape_dir, exist_ok=True)
+        if shutil.which("ogr2ogr") is None:                               
+            print(                                                        
+                "error: software environment is missing GDAL (ogr2ogr) — " 
+                "the container was not used; press Build Image, then Run again",  
+                file=sys.stderr)                                         
+            return 1  
         try:
             run(["ogr2ogr", "-f", "ESRI Shapefile", "-t_srs", "EPSG:4326",
                  "-where", where, "-nln", layer,

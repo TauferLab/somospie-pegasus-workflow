@@ -557,8 +557,9 @@ the command it prints, or from a notebook (plan_submit()).
     parser.add_argument("--config", default="config.yml")
     parser.add_argument("--state", default=None,
                         help="override region.state (e.g. AL)")
-    parser.add_argument("--container-sif", default=None,
-                        help="... omit = auto (config.yml container.sif else Apptainer/SOMOSPIE_Container.sif if built, else bare); pass '' for bare")
+    parser.add_argument("--container-sif", default="Apptainer/SOMOSPIE_Container.sif",
+                        help="Path to the Apptainer .sif image, absolute or relative to the "
+                             "workflow directory (default: Apptainer/SOMOSPIE_Container.sif)")
     parser.add_argument("--output", default=None,
                         help="DAG path (default from config)")
     parser.add_argument(
@@ -576,27 +577,17 @@ the command it prints, or from a notebook (plan_submit()).
         return 2
     
     wf_dir = os.path.dirname(os.path.abspath(args.config))
-    if args.container_sif is None:
-        try:
-            with open(args.config) as cf:
-                cfg_sif = (yaml.safe_load(cf) or {}).get("container", {}).get("sif")
-        except OSError:
-            cfg_sif = None
-        cand_rel = cfg_sif or "Apptainer/SOMOSPIE_Container.sif"
-        cand = cand_rel if os.path.isabs(cand_rel) else os.path.join(wf_dir, cand_rel)
-        if os.path.exists(cand):
-            args.container_sif = cand_rel
-        else:
-            logger.warning(f"no container at {cand_rel}, running bare")
-            args.container_sif = ""
-    if args.container_sif == "":
-        args.container_sif = None
-    if args.container_sif and not os.path.exists(
-            args.container_sif if os.path.isabs(args.container_sif)
-            else os.path.join(wf_dir, args.container_sif)):
-        print(f"error: container image not found: {args.container_sif}",
+    if not args.container_sif:
+        print("error: --container-sif is required — press Build Image first, then Run again",
               file=sys.stderr)
         return 2
+    sif_check = (args.container_sif if os.path.isabs(args.container_sif)
+                 else os.path.join(wf_dir, args.container_sif))
+    if not os.path.exists(sif_check):
+        print(f"error: software environment not built: {sif_check} missing — "
+              f"press Build Image first, then Run again", file=sys.stderr)
+        return 2
+
     
     try:
         wf = SOMOSPIEWorkflow(args.config, state=args.state,
