@@ -115,7 +115,7 @@ def main(argv=None):
         print("error: month manifest lists zero days", file=sys.stderr)
         return 1
 
-    with tempfile.TemporaryDirectory(prefix="proc_sm_") as workdir:
+    with tempfile.TemporaryDirectory(prefix="proc_sm_", dir=".") as workdir:
         try:
             with zipfile.ZipFile(args.days_zip) as zf:
                 zf.extractall(workdir)
