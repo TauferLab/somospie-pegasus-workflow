@@ -432,11 +432,11 @@ class SOMOSPIEWorkflow:
         # Render the map figure
         viz = c.get("visualization", {})
         fig_file = File(self.fig_name)
-        viz_args = ["--input", map_file.lfn, 
-                    "--output", fig_file.lfn,
-                    "--cmap", str(viz.get("cmap", "RdBu")),
-                    "--dpi", str(viz.get("dpi", 150)),
-                    "--title", self.title]
+        viz_args = ["--input", map_file.lfn,
+                     "--output", fig_file.lfn,
+                     "--cmap", str(viz.get("cmap", "RdBu")),
+                     "--dpi", str(viz.get("dpi", 150)),
+                     "--title", f'"{self.title}"']
         if viz.get("vmin") is not None:
             viz_args += ["--vmin", str(viz["vmin"])]
         if viz.get("vmax") is not None:
