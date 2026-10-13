@@ -42,25 +42,6 @@ MEMORY = {
     "visualize_map": "2GB",
 }
 
-# Pegasus worker package (kickstart etc.) used *inside* the optional
-# container, which must match the container base image. Left alone,
-# PegasusLite sees the submit host's package as a mismatch and tries to
-# download one from inside the container, which fails when the image has
-# no curl/wget (exit code 71). Change this with the container's base image.
-WORKER_PACKAGE_PLATFORM = "x86_64_deb_13"
-WORKER_PACKAGE_URL = ("https://download.pegasus.isi.edu/pegasus/{v}/"
-                      "pegasus-worker-{v}-" + WORKER_PACKAGE_PLATFORM + ".tar.gz")
-
-
-def planner_version():
-    """Version of the pegasus-plan that will plan this workflow, or None."""
-    try:
-        out = subprocess.run(["pegasus-version"], capture_output=True,
-                             text=True, timeout=30)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    version = out.stdout.strip()
-    return version if out.returncode == 0 and version else None
 
 
 class SOMOSPIEWorkflow:
@@ -90,18 +71,6 @@ class SOMOSPIEWorkflow:
         self.wf_name = self.config["workflow"]["name"]
         self.shared_scratch_dir = os.path.join(self.wf_dir, "scratch")
         self.local_storage_dir = os.path.join(self.wf_dir, "output")
-        os.makedirs(self.shared_scratch_dir, exist_ok=True)
-        os.makedirs(self.local_storage_dir, exist_ok=True)
-        # Only the container needs its own worker package (see above).
-        self.worker_package_url = None
-        if container_sif:
-            version = planner_version()
-            if version:
-                self.worker_package_url = WORKER_PACKAGE_URL.format(v=version)
-            else:
-                logger.warning(
-                    "pegasus-version not found; the container will try to "
-                    "download a worker package itself and fail (no curl/wget)")
 
         self.validate_config()
         self.derive()
@@ -205,12 +174,6 @@ class SOMOSPIEWorkflow:
             # a locally generated one. pegasus-plan downloads and caches the
             # named file from the catalog repository at plan time.
             self.props["pegasus.catalog.site.repo.file"] = hosted_site_catalog
-        if self.worker_package_url:
-            # Stage the container's worker package named in the transformation
-            # catalog and never download one from inside the job.
-            self.props["pegasus.transfer.worker.package"] = "true"
-            self.props["pegasus.transfer.worker.package.strict"] = "false"
-            self.props["pegasus.transfer.worker.package.autodownload"] = "false"
 
 
     def create_sites_catalog(self, exec_site_name="compute"):
@@ -264,18 +227,7 @@ class SOMOSPIEWorkflow:
                 "somospie_container", Container.SINGULARITY,
                 image="file://" + os.path.abspath(sif_path), image_site="local")
             self.tc.add_containers(container)
-            if self.worker_package_url:
-                self.tc.add_transformations(
-                    Transformation(
-                        "worker",
-                        namespace="pegasus",
-                        site="local",
-                        pfn=self.worker_package_url,
-                        is_stageable=True,
-                        arch=Arch.X86_64,
-                        os_type=OS.LINUX,
-                    )
-                )
+
         scripts = {
             "acquire_terrain": "bin/acquire_terrain.py",
             "acquire_roi": "bin/acquire_roi.py",
