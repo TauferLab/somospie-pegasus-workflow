@@ -29,15 +29,13 @@ From: python:3.13-slim-trixie
     set -eu
     export DEBIAN_FRONTEND=noninteractive
 
-    # curl + wget are mandatory: PegasusLite downloads its worker package
-    # inside the container before the job script ever runs.
-    # gdal-bin + python3-gdal stay version-locked via apt.
     apt-get update && apt-get install -y --no-install-recommends \
         curl wget ca-certificates \
-        gdal-bin python3-gdal \
+        gdal-bin libgdal-dev g++ \
      && rm -rf /var/lib/apt/lists/*
 
     pip install --no-cache-dir \
+        "GDAL==$(gdal-config --version)" \
         pandas scikit-learn numpy netCDF4 requests matplotlib
 
     mkdir -p /app/output
